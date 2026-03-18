@@ -1,0 +1,194 @@
+/* App shell styling used by layouts and shared header. */
+
+.appShell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.appHeader {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(36, 36, 36, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+@media (prefers-color-scheme: light) {
+  .appHeader {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.9);
+  }
+}
+
+.appHeaderInner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0.9rem 1.25rem;
+
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.navGroups {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.navGroup {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.navGroupTitle {
+  opacity: 0.75;
+  font-size: 0.9rem;
+}
+
+.navLink {
+  padding: 0.25rem 0.4rem;
+  border-radius: 6px;
+}
+
+.navLinkActive {
+  outline: 1px solid rgba(100, 108, 255, 0.7);
+  background: rgba(100, 108, 255, 0.12);
+}
+
+.appMain {
+  flex: 1;
+}
+
+.pageContainer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  .card {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+  }
+}
+
+.muted {
+  opacity: 0.8;
+}
+
+/* ---- Storefront page building blocks (Step 3) ---- */
+
+.pageTitleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.pageSubtitle {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+  opacity: 0.85;
+}
+
+.toolbar {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.textInput {
+  width: min(520px, 100%);
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+}
+
+@media (prefers-color-scheme: light) {
+  .textInput {
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    background: rgba(0, 0, 0, 0.03);
+  }
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(100, 108, 255, 0.5);
+  background: rgba(100, 108, 255, 0.12);
+}
+
+.grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 0.9rem;
+}
+
+.gridCol6 {
+  grid-column: span 6;
+}
+
+.gridCol4 {
+  grid-column: span 4;
+}
+
+@media (max-width: 860px) {
+  .gridCol6,
+  .gridCol4 {
+    grid-column: span 12;
+  }
+}
+
+.gridCard {
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+@media (prefers-color-scheme: light) {
+  .gridCard {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: rgba(0, 0, 0, 0.02);
+  }
+}
+
+.alert {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 99, 132, 0.35);
+  background: rgba(255, 99, 132, 0.12);
+}
+
+.alertTitle {
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
