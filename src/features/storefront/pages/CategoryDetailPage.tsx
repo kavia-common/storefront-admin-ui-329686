@@ -66,7 +66,7 @@ export function CategoryDetailPage() {
       <p className="pageSubtitle">
         {showDeveloperDetails ? (
           <>
-            Loaded via <code>/api/__preview/catalog/stores/&lt;storeId&gt;/categories/&lt;categoryId&gt;</code>
+            Loaded via a gateway catalog route: <code>/api/.../catalog/stores/&lt;storeId&gt;/categories/&lt;categoryId&gt;</code>
           </>
         ) : (
           <>Category details.</>

@@ -230,7 +230,7 @@ export function ProductDetailPage() {
             <div className="card" aria-label="Purchase panel">
               <h2 style={{ marginTop: 0 }}>Add to cart</h2>
               <p className="muted" style={{ marginTop: 0 }}>
-                Cart items: <strong>{cartCount}</strong> · Uses backend cart-service when available, otherwise falls back to a local (preview) cart.
+                Cart items: <strong>{cartCount}</strong> · Uses the backend cart-service when available, otherwise stores items in your browser.
               </p>
 
               <div className="toolbar" aria-label="Add to cart controls" style={{ marginTop: "0.5rem" }}>

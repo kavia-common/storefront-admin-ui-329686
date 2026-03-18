@@ -113,12 +113,12 @@ export function StorefrontHomePage() {
         </div>
       </div>
 
-      <div className="card" aria-label="Category preview">
+      <div className="card" aria-label="Featured categories">
         <div className="pageTitleRow" style={{ marginBottom: "0.5rem" }}>
           <h2 style={{ margin: 0 }}>Featured categories</h2>
           <span className="badge" title="Best-effort from backend category tree">
             <span className="badgeDot" aria-hidden="true" />
-            Preview
+            Featured
           </span>
         </div>
 

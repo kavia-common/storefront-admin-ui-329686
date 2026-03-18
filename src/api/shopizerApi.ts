@@ -573,7 +573,7 @@ export function createShopizerApi(params: {
     const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
     const hint =
       response.status === 404
-        ? "\n\nHint: 404 can mean the categoryId doesn't exist for this store, or the gateway preview route isn't available."
+        ? "\n\nHint: 404 can mean the categoryId doesn't exist for this store, or the gateway route isn't available."
         : "";
 
     return {

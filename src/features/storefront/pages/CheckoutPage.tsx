@@ -67,19 +67,19 @@ function buildPlaceholderOptions(): UiShippingOption[] {
     {
       key: "placeholder:standard",
       label: "Standard",
-      detail: "5–7 business days (placeholder)",
+      detail: "5–7 business days",
       source: "placeholder",
     },
     {
       key: "placeholder:express",
       label: "Express",
-      detail: "2–3 business days (placeholder)",
+      detail: "2–3 business days",
       source: "placeholder",
     },
     {
       key: "placeholder:overnight",
       label: "Overnight",
-      detail: "Next business day (placeholder)",
+      detail: "Next business day",
       source: "placeholder",
     },
   ];
@@ -114,9 +114,9 @@ export function CheckoutPage() {
 
   const paymentOptions: PaymentOption[] = useMemo(
     () => [
-      { id: "card", label: "Credit card", detail: "Card entry will be added later (placeholder)" },
-      { id: "paypal", label: "PayPal", detail: "PayPal redirect will be added later (placeholder)" },
-      { id: "cod", label: "Cash on delivery", detail: "For demo/testing only (placeholder)" },
+      { id: "card", label: "Credit card", detail: "Card entry will be added later." },
+      { id: "paypal", label: "PayPal", detail: "PayPal redirect will be added later." },
+      { id: "cod", label: "Cash on delivery", detail: "For demo/testing only." },
     ],
     [],
   );
@@ -587,7 +587,7 @@ export function CheckoutPage() {
           <h2 style={{ marginTop: 0 }}>Order summary</h2>
           <p className="muted" style={{ marginTop: 0 }}>
             Items: <strong>{totalItems}</strong> · Mode:{" "}
-            <strong>{cart.mode === "backend" ? "Backend cart" : "Local cart (preview)"}</strong>
+            <strong>{cart.mode === "backend" ? "Backend cart" : "Local cart"}</strong>
           </p>
 
           {totalItems === 0 ? (
@@ -666,7 +666,7 @@ export function CheckoutPage() {
 
               <div className="toolbar" aria-label="Place order" style={{ marginTop: 0 }}>
                 <button onClick={() => void placeOrder()} disabled={!canPlaceOrder || cartLoading}>
-                  {placingOrder ? "Placing order…" : "Place order (placeholder)"}
+                  {placingOrder ? "Placing order…" : "Place order"}
                 </button>
 
                 <span className="muted">

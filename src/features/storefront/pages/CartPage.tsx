@@ -17,7 +17,7 @@ export function CartPage() {
     <div>
       <div className="pageTitleRow">
         <h1>Cart</h1>
-        <span className="badge">{cart.mode === "backend" ? "Backend cart" : "Local cart (preview)"}</span>
+        <span className="badge">{cart.mode === "backend" ? "Backend cart" : "Local cart"}</span>
       </div>
 
       <p className="pageSubtitle">
@@ -123,8 +123,8 @@ export function CartPage() {
         {!canCheckout && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>
-              Checkout requires the backend checkout services to be available. In preview mode, services may be running
-              in a limited configuration.
+              Checkout requires the backend checkout services to be available. In some environments, services may be running in a limited
+              configuration.
             </p>
             {showDeveloperDetails && (
               <p style={{ marginBottom: 0 }}>
