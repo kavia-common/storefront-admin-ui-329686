@@ -58,11 +58,21 @@ function CategoryTreeNodeView(props: { node: CategoryNode; defaultOpen: boolean;
   const children = Array.isArray(props.node.children) ? props.node.children : [];
   const hasChildren = children.length > 0;
 
+  const id = props.node.id;
+  const canLink = typeof id === "string" && id.trim().length > 0;
+  const titleEl = canLink ? (
+    <a href={`/categories/${encodeURIComponent(id)}`} style={{ textDecoration: "none" }}>
+      <strong>{name}</strong>
+    </a>
+  ) : (
+    <strong>{name}</strong>
+  );
+
   if (!hasChildren) {
     return (
       <li>
         <div>
-          <strong>{name}</strong>
+          {titleEl}
           {metaPieces ? (
             <>
               {" "}
@@ -78,7 +88,7 @@ function CategoryTreeNodeView(props: { node: CategoryNode; defaultOpen: boolean;
     <li>
       <details open={props.defaultOpen}>
         <summary>
-          <strong>{name}</strong>
+          {titleEl}
           {metaPieces ? (
             <>
               {" "}

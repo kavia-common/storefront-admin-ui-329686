@@ -80,6 +80,15 @@ export interface CategoryTreeResult {
   url?: string;
 }
 
+export interface CategoryByIdResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  category?: CategoryNode;
+  error?: string;
+  url?: string;
+}
+
 /**
  * Catalog-service DTO (serialized JSON).
  * See: shopizer-modern-java21/catalog-service ProductSummaryResponse
@@ -486,6 +495,92 @@ export function createShopizerApi(params: {
       status: response.status,
       bodyText: response.text,
       categories: [],
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
+    };
+  }
+
+  async function getCategoryById(input: {
+    /**
+     * Category id (UUID string).
+     * This is end-to-end integrated via the gateway preview family:
+     *   GET /api/__preview/catalog/stores/{storeId}/categories/{categoryId}
+     *
+     * Contract:
+     * - Inputs: categoryId (required), optional storeId override, optional AbortSignal
+     * - Output: CategoryByIdResult containing CategoryNode on success
+     * - Errors: never throws; returns ok=false with rich context + truncated body
+     * - Side effects: performs a network request through the canonical http client
+     */
+    categoryId: string;
+    storeId?: string;
+    signal?: AbortSignal;
+  }): Promise<CategoryByIdResult> {
+    const operation = "catalog.getCategoryById";
+    const storeId = input.storeId ?? getOrCreateStoreId(params.defaultStoreId);
+    const categoryId = input.categoryId?.trim();
+
+    if (!storeId) {
+      return {
+        ok: false,
+        status: 0,
+        bodyText: "",
+        category: undefined,
+        url: undefined,
+        error: normalizeStoreIdErrorMessage("categories"),
+      };
+    }
+
+    if (!categoryId) {
+      return {
+        ok: false,
+        status: 0,
+        bodyText: "",
+        category: undefined,
+        url: undefined,
+        error: "Missing required categoryId.",
+      };
+    }
+
+    // IMPORTANT:
+    // The work item requires category-by-id to be non-stubbed for the modernized flow.
+    // We keep the other catalog endpoints as preview stubs (as requested), but this
+    // call is wired end-to-end through the gateway route.
+    const safeCategoryId = encodeURIComponent(categoryId);
+
+    const response: ApiResponse<ModernCategoryResponse> = await http.request<ModernCategoryResponse>({
+      operation,
+      method: "GET",
+      path: `/__preview/catalog/stores/${storeId}/categories/${safeCategoryId}`,
+      headers: { Accept: "application/json" },
+      parse: parseJson<ModernCategoryResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        bodyText: response.text,
+        category: toCategoryNodeFromModern(response.data),
+        url: response.url,
+      };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: 404 can mean the categoryId doesn't exist for this store, or the gateway preview route isn't available."
+        : "";
+
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      category: undefined,
       url: response.url,
       error:
         `${response.error.message}` +
@@ -1033,6 +1128,7 @@ export function createShopizerApi(params: {
     },
     catalog: {
       getCategoryTree,
+      getCategoryById,
       listProducts,
       getProductBySku,
     },

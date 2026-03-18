@@ -8,6 +8,7 @@ import { AdminDashboardPage } from "./features/admin/pages/AdminDashboardPage";
 import { AdminOrdersPage } from "./features/admin/pages/AdminOrdersPage";
 import { CartPage } from "./features/storefront/pages/CartPage";
 import { CategoriesPage } from "./features/storefront/pages/CategoriesPage";
+import { CategoryDetailPage } from "./features/storefront/pages/CategoryDetailPage";
 import { CheckoutPage } from "./features/storefront/pages/CheckoutPage";
 import { OrderConfirmationPage } from "./features/storefront/pages/OrderConfirmationPage";
 import { MyAccountPage } from "./features/storefront/pages/MyAccountPage";
@@ -33,6 +34,7 @@ function App() {
       <Route path="/" element={<StorefrontLayout />}>
         <Route index element={<StorefrontHomePage />} />
         <Route path="categories" element={<CategoriesPage />} />
+        <Route path="categories/:categoryId" element={<CategoryDetailPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route path="products/:sku" element={<ProductDetailPage />} />
         <Route path="cart" element={<CartPage />} />
