@@ -14,7 +14,7 @@ export class ApiError extends Error {
 
   constructor(kind: ApiErrorKind, message: string, cause?: unknown) {
     super(message);
-    this.name = "ApiError";
+    this.name = "ApiError2";
     this.kind = kind;
     this.cause = cause;
   }
