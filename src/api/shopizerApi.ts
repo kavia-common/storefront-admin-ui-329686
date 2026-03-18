@@ -1,6 +1,7 @@
 import type { ApiResponse } from "./httpClient";
 import type { ApiLogger } from "./httpClient";
 import { createHttpClient, parseJson } from "./httpClient";
+import { getApiRequestContext, getOrCreateStoreId } from "../shared/session/storeSession";
 
 export type ActuatorHealthPayload = Record<string, unknown>;
 
@@ -79,6 +80,173 @@ export interface CategoryTreeResult {
   url?: string;
 }
 
+/**
+ * Catalog-service DTO (serialized JSON).
+ * See: shopizer-modern-java21/catalog-service ProductSummaryResponse
+ */
+export interface ProductSummaryResponse {
+  id: string; // UUID
+  merchantStoreId: string; // UUID
+  sku: string;
+  type: string;
+  available: boolean;
+  createdAt: string; // Instant
+  updatedAt: string; // Instant
+}
+
+/**
+ * Catalog-service DTO (serialized JSON).
+ * See: shopizer-modern-java21/catalog-service ProductDetailResponse
+ */
+export interface ProductDetailResponse {
+  id: string; // UUID
+  merchantStoreId: string; // UUID
+  sku: string;
+  type: string;
+  available: boolean;
+  descriptions: Array<{
+    languageId: string; // UUID
+    name: string;
+    description: string;
+    friendlyUrl: string;
+  }>;
+  createdAt: string; // Instant
+  updatedAt: string; // Instant
+}
+
+export interface ProductListResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  products: ProductSummaryResponse[];
+  page?: {
+    number?: number;
+    size?: number;
+    totalElements?: number;
+    totalPages?: number;
+  };
+  error?: string;
+  url?: string;
+}
+
+export interface ProductDetailResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  product?: ProductDetailResponse;
+  error?: string;
+  url?: string;
+}
+
+/** cart-service DTO (serialized JSON). */
+export interface CartItemResponse {
+  id: string; // UUID
+  productId: string; // UUID
+  quantity: number;
+  createdAt: string; // Instant
+  updatedAt: string; // Instant
+}
+
+/** cart-service DTO (serialized JSON). */
+export interface CartResponse {
+  id: string; // UUID
+  merchantStoreId: string; // UUID
+  customerId: string; // UUID
+  currency: string;
+  status: string;
+  createdAt: string; // Instant
+  updatedAt: string; // Instant
+  items: CartItemResponse[];
+}
+
+export interface CartApiResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  cart?: CartResponse;
+  error?: string;
+  url?: string;
+}
+
+export interface CheckoutApiResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  /** Parsed JSON when possible (schema varies by phase). */
+  json?: unknown;
+  error?: string;
+  url?: string;
+}
+
+/** shipping-service DTO (serialized JSON). Mirrors shipping-service QuoteRequest/QuoteResponse. */
+export interface ShippingQuoteRequest {
+  destination: { country: string; postalCode?: string; region?: string };
+  currency: string;
+  items: Array<{ sku: string; quantity: number; weightGrams: number }>;
+}
+
+/** shipping-service DTO (serialized JSON). */
+export interface ShippingQuoteResponse {
+  requestId: string;
+  quotedAt: string;
+  currency: string;
+  quotes: Array<{
+    provider: string;
+    serviceLevel: string;
+    serviceName: string;
+    amount: number;
+  }>;
+}
+
+export interface ShippingQuotesApiResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  quotes?: ShippingQuoteResponse;
+  error?: string;
+  url?: string;
+}
+
+/** order-service DTOs (serialized JSON). Mirrors shopizer-modern-java21/order-service OrderResponse. */
+export interface OrderItemResponse {
+  id: string; // UUID
+  productId: string; // UUID
+  quantity: number;
+  unitAmount: number; // minor currency units
+}
+
+/** order-service DTO (serialized JSON). */
+export interface OrderResponse {
+  id: string; // UUID
+  merchantStoreId: string; // UUID
+  customerId: string; // UUID
+  currency: string;
+  status: string;
+  paymentStatus: string;
+  totalAmount: number; // minor currency units
+  createdAt: string; // Instant
+  updatedAt: string; // Instant
+  items: OrderItemResponse[];
+}
+
+export interface OrderListApiResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  orders: OrderResponse[];
+  error?: string;
+  url?: string;
+}
+
+export interface OrderDetailApiResult {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  order?: OrderResponse;
+  error?: string;
+  url?: string;
+}
+
 type SpringPage<T> = {
   content: T[];
   totalElements?: number;
@@ -106,35 +274,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function asCategoryNodeArray(payload: unknown): CategoryNode[] {
-  // The Shopizer docs show a single object in examples, but in practice this endpoint is
-  // often a list (root categories), and sometimes wrapped.
-  if (Array.isArray(payload)) return payload as CategoryNode[];
-
-  if (isRecord(payload)) {
-    // Some APIs wrap results
-    const categories = payload.categories;
-    if (Array.isArray(categories)) return categories as CategoryNode[];
-
-    // Some APIs may return a single category root with children
-    const hasChildren = Array.isArray(payload.children);
-    const hasCodeOrId =
-      typeof payload.code === "string" ||
-      typeof payload.id === "number" ||
-      typeof payload.id === "string";
-    if (hasChildren || hasCodeOrId) return [payload as unknown as CategoryNode];
-  }
-
-  return [];
-}
-
 function asSpringPage<T>(payload: unknown): SpringPage<T> | null {
   if (!isRecord(payload)) return null;
   if (!Array.isArray(payload.content)) return null;
   return payload as SpringPage<T>;
 }
 
-function toCategoryDescriptionFromModern(d: ModernCategoryResponse["descriptions"][number]): CategoryDescription {
+function toCategoryDescriptionFromModern(
+  d: ModernCategoryResponse["descriptions"][number],
+): CategoryDescription {
   return {
     // We don't have legacy language codes here; keep optional.
     name: d.name ?? undefined,
@@ -200,14 +348,31 @@ function buildTreeFromModernCategories(flat: ModernCategoryResponse[]): Category
   return roots;
 }
 
+function normalizeStoreIdErrorMessage(kind: "categories" | "products"): string {
+  if (kind === "categories") {
+    return (
+      "No store UUID configured for category loading. " +
+      "Set VITE_DEFAULT_STORE_ID (or pass { storeId }) so the UI can call " +
+      "GET /api/v1/catalog/stores/{storeUuid}/categories."
+    );
+  }
+
+  return (
+    "No store UUID configured for product loading. " +
+    "Set VITE_DEFAULT_STORE_ID (or pass { storeId }) so the UI can call " +
+    "GET /api/v1/catalog/stores/{storeUuid}/products and " +
+    "GET /api/v1/catalog/stores/{storeUuid}/products/{sku}."
+  );
+}
+
 // PUBLIC_INTERFACE
 export function createShopizerApi(params: {
   basePath: string;
   logger?: ApiLogger;
   /**
    * Optional default store UUID for Shopizer Modern endpoints.
-   * If provided, category loading will prefer the modern endpoint:
-   *   GET /api/v1/catalog/stores/{storeId}/categories
+   * If provided, category/product loading will prefer the modern endpoint family:
+   *   GET /api/v1/catalog/stores/{storeId}/...
    */
   defaultStoreId?: string;
 }) {
@@ -218,7 +383,11 @@ export function createShopizerApi(params: {
    * - It translates UI use-cases into concrete endpoint calls.
    * - It keeps endpoint paths centralized and searchable.
    */
-  const http = createHttpClient({ basePath: params.basePath, logger: params.logger });
+  const http = createHttpClient({
+    basePath: params.basePath,
+    logger: params.logger,
+    contextProvider: () => getApiRequestContext({ fallbackStoreId: params.defaultStoreId }),
+  });
 
   async function getActuatorHealth(): Promise<ActuatorHealthResult> {
     const operation = "system.getActuatorHealth";
@@ -260,149 +429,601 @@ export function createShopizerApi(params: {
 
   async function getCategoryTree(input?: {
     /**
-     * Legacy / compatibility store code. Shopizer docs/examples commonly use DEFAULT.
-     * (Used by legacy endpoints that accept store code as query param.)
-     */
-    store?: string;
-    /**
-     * Shopizer Modern store id (UUID). Required for modern catalog endpoints.
+     * Shopizer Modern store id (UUID). Required for the modern catalog endpoint.
+     * If omitted, the API client will fall back to `defaultStoreId` configured in `createShopizerApi`.
      */
     storeId?: string;
-    /**
-     * Optional language hint.
-     *
-     * Notes:
-     * - Legacy Shopizer (sm-shop) exposes list categories at:
-     *     GET /services/public/category/{store}/{language}
-     * - Some other deployments accept `lang` as query param; we keep supporting that too.
-     */
-    lang?: string;
     signal?: AbortSignal;
   }): Promise<CategoryTreeResult> {
     const operation = "catalog.getCategoryTree";
 
-    const storeCode = input?.store ?? "DEFAULT";
-    const storeId = input?.storeId ?? params.defaultStoreId;
-    const lang = input?.lang ?? "en";
+    const storeId = input?.storeId ?? getOrCreateStoreId(params.defaultStoreId);
 
-    // Graceful handling: deployments may expose different endpoints depending on which backend is
-    // running behind the "/api" proxy (legacy Shopizer vs Shopizer Modern services).
-    //
-    // Strategy:
-    // 1) Prefer Shopizer Modern endpoint (if we have a store UUID):
-    //      GET /api/v1/catalog/stores/{storeId}/categories
-    // 2) Prefer legacy Shopizer (sm-shop) public endpoint:
-    //      GET /services/public/category/{store}/{language}
-    // 3) Fall back to other legacy-looking endpoints (some gateways expose them).
-    const candidates: Array<{
-      kind: "modernPaged" | "legacyJson";
-      label: string;
-      path: string;
-      query?: Record<string, string | number | undefined>;
-    }> = [];
-
-    if (storeId) {
-      candidates.push({
-        kind: "modernPaged",
-        label: "modern:/v1/catalog/stores/{storeId}/categories",
-        path: `/v1/catalog/stores/${storeId}/categories`,
-        query: { page: 0, size: 200 },
-      });
+    if (!storeId) {
+      return {
+        ok: false,
+        status: 0,
+        bodyText: "",
+        categories: [],
+        url: undefined,
+        error: normalizeStoreIdErrorMessage("categories"),
+      };
     }
 
-    // Legacy Shopizer (sm-shop) endpoint for category listing.
-    candidates.push({
-      kind: "legacyJson",
-      label: "legacy:/services/public/category/{store}/{language}",
-      path: `/services/public/category/${storeCode}/${lang}`,
+    // Modern (only): GET /api/v1/catalog/stores/{storeUuid}/categories?page=0&size=...
+    // Note: UI basePath defaults to "/api", so this uses "/api/v1/..." at runtime.
+    const response: ApiResponse<unknown> = await http.request<unknown>({
+      operation,
+      method: "GET",
+      path: `/v1/catalog/stores/${storeId}/categories`,
+      query: { page: 0, size: 200 },
+      headers: { Accept: "application/json" },
+      parse: parseJson<unknown>(),
+      signal: input?.signal,
     });
 
-    // Other common legacy endpoints (some deployments/gateways expose them).
-    candidates.push(
-      { kind: "legacyJson", label: "legacy:/v1/categories?store=...", path: "/v1/categories", query: { store: storeCode, lang } },
-      { kind: "legacyJson", label: "legacy:/v1/category?store=...", path: "/v1/category", query: { store: storeCode, lang } },
-    );
-
-    const attempted: Array<{ label: string; url: string; status: number }> = [];
-
-    let lastFailure:
-      | { status: number; url: string; text: string; errorMessage: string }
-      | undefined;
-
-    for (const candidate of candidates) {
-      const response: ApiResponse<unknown> = await http.request<unknown>({
-        operation,
-        method: "GET",
-        path: candidate.path,
-        query: candidate.query,
-        headers: { Accept: "application/json" },
-        parse: parseJson<unknown>(),
-        signal: input?.signal,
-      });
-
-      attempted.push({ label: candidate.label, url: response.url, status: response.status });
-
-      if (response.ok) {
-        if (candidate.kind === "modernPaged") {
-          const page = asSpringPage<ModernCategoryResponse>(response.data);
-          const flat = page?.content ?? [];
-          const categories = buildTreeFromModernCategories(flat);
-          return {
-            ok: true,
-            status: response.status,
-            bodyText: response.text,
-            categories,
-            url: response.url,
-          };
-        }
-
-        const categories = asCategoryNodeArray(response.data);
-        return {
-          ok: true,
-          status: response.status,
-          bodyText: response.text,
-          categories,
-          url: response.url,
-        };
-      }
-
-      const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
-      const attemptedSummary = attempted
-        .map((a) => `${a.status || "ERR"} ${a.url} (${a.label})`)
-        .join(" → ");
-
-      lastFailure = {
+    if (response.ok) {
+      const page = asSpringPage<ModernCategoryResponse>(response.data);
+      const flat = page?.content ?? [];
+      const categories = buildTreeFromModernCategories(flat);
+      return {
+        ok: true,
         status: response.status,
+        bodyText: response.text,
+        categories,
         url: response.url,
-        text: response.text,
-        errorMessage:
-          `${response.error.message}` +
-          (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
-          (attemptedSummary ? `\n\nAttempted:\n${attemptedSummary}` : ""),
       };
-
-      // Continue trying alternates for common "wrong endpoint/backend" signals.
-      // - 404 => endpoint not present
-      // - 500/502/503/504 => gateway/backend mismatch or backend failure for that route
-      //
-      // Fail fast on auth errors since alternates are unlikely to help.
-      const shouldTryNext =
-        response.status === 404 ||
-        response.status === 500 ||
-        response.status === 502 ||
-        response.status === 503 ||
-        response.status === 504;
-
-      if (!shouldTryNext) break;
     }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: Ensure the gateway routes /api/v1/catalog/** to the catalog service, and that VITE_DEFAULT_STORE_ID matches an existing store UUID."
+        : "";
 
     return {
       ok: false,
-      status: lastFailure?.status ?? 0,
-      bodyText: lastFailure?.text ?? "",
+      status: response.status,
+      bodyText: response.text,
       categories: [],
-      error: lastFailure?.errorMessage ?? "Unknown error while loading categories",
-      url: lastFailure?.url,
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
+    };
+  }
+
+  async function listProducts(input?: {
+    storeId?: string;
+    page?: number;
+    size?: number;
+    signal?: AbortSignal;
+  }): Promise<ProductListResult> {
+    const operation = "catalog.listProducts";
+    const storeId = input?.storeId ?? params.defaultStoreId;
+
+    if (!storeId) {
+      return {
+        ok: false,
+        status: 0,
+        bodyText: "",
+        products: [],
+        error: normalizeStoreIdErrorMessage("products"),
+      };
+    }
+
+    const response: ApiResponse<unknown> = await http.request<unknown>({
+      operation,
+      method: "GET",
+      path: `/v1/catalog/stores/${storeId}/products`,
+      query: { page: input?.page ?? 0, size: input?.size ?? 20 },
+      headers: { Accept: "application/json" },
+      parse: parseJson<unknown>(),
+      signal: input?.signal,
+    });
+
+    if (response.ok) {
+      const page = asSpringPage<ProductSummaryResponse>(response.data);
+      const products = page?.content ?? [];
+
+      return {
+        ok: true,
+        status: response.status,
+        bodyText: response.text,
+        products,
+        page: {
+          number: page?.number,
+          size: page?.size,
+          totalElements: page?.totalElements,
+          totalPages: page?.totalPages,
+        },
+        url: response.url,
+      };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: Ensure the gateway routes /api/v1/catalog/** to the catalog service, and that VITE_DEFAULT_STORE_ID matches an existing store UUID."
+        : "";
+
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      products: [],
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
+    };
+  }
+
+  async function getProductBySku(input: {
+    sku: string;
+    storeId?: string;
+    signal?: AbortSignal;
+  }): Promise<ProductDetailResult> {
+    const operation = "catalog.getProductBySku";
+    const storeId = input.storeId ?? getOrCreateStoreId(params.defaultStoreId);
+
+    if (!storeId) {
+      return {
+        ok: false,
+        status: 0,
+        bodyText: "",
+        product: undefined,
+        error: normalizeStoreIdErrorMessage("products"),
+      };
+    }
+
+    const safeSku = encodeURIComponent(input.sku);
+    const response: ApiResponse<ProductDetailResponse> = await http.request<ProductDetailResponse>({
+      operation,
+      method: "GET",
+      path: `/v1/catalog/stores/${storeId}/products/${safeSku}`,
+      headers: { Accept: "application/json" },
+      parse: parseJson<ProductDetailResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        bodyText: response.text,
+        product: response.data,
+        url: response.url,
+      };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: A 404 can mean the SKU does not exist for the configured store, or the gateway is not routing /api/v1/catalog/** correctly."
+        : "";
+
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      product: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
+    };
+  }
+
+  function normalizeBearer(token: string | undefined): string | undefined {
+    if (!token) return undefined;
+    const t = token.trim();
+    if (!t) return undefined;
+    return t.toLowerCase().startsWith("bearer ") ? t : `Bearer ${t}`;
+  }
+
+  async function getOrCreateActiveCart(input: {
+    merchantStoreId: string;
+    customerId: string;
+    currency: string;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<CartApiResult> {
+    const operation = "cart.getOrCreateActiveCart";
+    const response: ApiResponse<CartResponse> = await http.request<CartResponse>({
+      operation,
+      method: "POST",
+      path: "/v1/carts/active",
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      body: {
+        merchantStoreId: input.merchantStoreId,
+        customerId: input.customerId,
+        currency: input.currency,
+      },
+      parse: parseJson<CartResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return { ok: true, status: response.status, bodyText: response.text, cart: response.data, url: response.url };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      cart: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` + (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : ""),
+    };
+  }
+
+  async function getCart(input: {
+    cartId: string;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<CartApiResult> {
+    const operation = "cart.getCart";
+    const safeCartId = encodeURIComponent(input.cartId);
+    const response: ApiResponse<CartResponse> = await http.request<CartResponse>({
+      operation,
+      method: "GET",
+      path: `/v1/carts/${safeCartId}`,
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      parse: parseJson<CartResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return { ok: true, status: response.status, bodyText: response.text, cart: response.data, url: response.url };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      cart: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` + (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : ""),
+    };
+  }
+
+  async function addItem(input: {
+    cartId: string;
+    productId: string;
+    quantity: number;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<CartApiResult> {
+    const operation = "cart.addItem";
+    const safeCartId = encodeURIComponent(input.cartId);
+    const response: ApiResponse<CartResponse> = await http.request<CartResponse>({
+      operation,
+      method: "POST",
+      path: `/v1/carts/${safeCartId}/items`,
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      body: { productId: input.productId, quantity: input.quantity },
+      parse: parseJson<CartResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return { ok: true, status: response.status, bodyText: response.text, cart: response.data, url: response.url };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      cart: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` + (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : ""),
+    };
+  }
+
+  async function setItemQuantity(input: {
+    cartId: string;
+    productId: string;
+    quantity: number;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<CartApiResult> {
+    const operation = "cart.setItemQuantity";
+    const safeCartId = encodeURIComponent(input.cartId);
+    const response: ApiResponse<CartResponse> = await http.request<CartResponse>({
+      operation,
+      method: "PUT",
+      path: `/v1/carts/${safeCartId}/items`,
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      body: { productId: input.productId, quantity: input.quantity },
+      parse: parseJson<CartResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return { ok: true, status: response.status, bodyText: response.text, cart: response.data, url: response.url };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      cart: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` + (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : ""),
+    };
+  }
+
+  async function removeItem(input: {
+    cartId: string;
+    productId: string;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<CartApiResult> {
+    const operation = "cart.removeItem";
+    const safeCartId = encodeURIComponent(input.cartId);
+    const safeProductId = encodeURIComponent(input.productId);
+    const response: ApiResponse<CartResponse> = await http.request<CartResponse>({
+      operation,
+      method: "DELETE",
+      path: `/v1/carts/${safeCartId}/items/${safeProductId}`,
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      parse: parseJson<CartResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return { ok: true, status: response.status, bodyText: response.text, cart: response.data, url: response.url };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      cart: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` + (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : ""),
+    };
+  }
+
+  async function createOrderFromCart(input: {
+    cartId: string;
+    merchantStoreId: string;
+    customerId: string;
+    /**
+     * UI-selected payment method (placeholder).
+     * Note: backend Phase 1 may ignore/override this value (e.g., always authorizes PayPal).
+     */
+    paymentMethod?: string;
+    destination: { country: string; postalCode?: string; region?: string };
+    storeCode?: string;
+    couponCode?: string;
+    selectedShippingQuote?: { provider: string; serviceLevel: string };
+    defaultItemWeightGrams?: number;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<CheckoutApiResult> {
+    const operation = "checkout.createOrderFromCart";
+    const response: ApiResponse<unknown> = await http.request<unknown>({
+      operation,
+      method: "POST",
+      path: "/checkout/orders",
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      body: {
+        cartId: input.cartId,
+        merchantStoreId: input.merchantStoreId,
+        customerId: input.customerId,
+        paymentMethod: input.paymentMethod,
+        storeCode: input.storeCode,
+        couponCode: input.couponCode,
+        destination: input.destination,
+        selectedShippingQuote: input.selectedShippingQuote,
+        defaultItemWeightGrams: input.defaultItemWeightGrams,
+      },
+      // Keep as JSON (unknown) so UI can show it as pretty JSON.
+      parse: parseJson<unknown>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return { ok: true, status: response.status, bodyText: response.text, json: response.data, url: response.url };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      url: response.url,
+      error:
+        `${response.error.message}` + (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : ""),
+    };
+  }
+
+  async function listOrders(input: {
+    merchantStoreId: string;
+    customerId: string;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<OrderListApiResult> {
+    const operation = "orders.listOrders";
+
+    // order-service is mounted at /api/orders in the gateway. Since frontend basePath defaults to "/api",
+    // this becomes a request to: GET /api/orders?merchantStoreId=...&customerId=...
+    const response: ApiResponse<OrderResponse[]> = await http.request<OrderResponse[]>({
+      operation,
+      method: "GET",
+      path: "/orders",
+      query: { merchantStoreId: input.merchantStoreId, customerId: input.customerId },
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      parse: parseJson<OrderResponse[]>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        bodyText: response.text,
+        orders: Array.isArray(response.data) ? response.data : [],
+        url: response.url,
+      };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: The orders endpoint is expected at GET /api/orders. Ensure the gateway routes /api/orders/** to order-service."
+        : response.status === 401
+          ? "\n\nHint: order-service is secured. Set VITE_DEV_BEARER_TOKEN to a valid JWT (Keycloak-issued) to enable order history."
+          : "";
+
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      orders: [],
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
+    };
+  }
+
+  async function getOrder(input: {
+    orderId: string;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<OrderDetailApiResult> {
+    const operation = "orders.getOrder";
+    const safeOrderId = encodeURIComponent(input.orderId);
+
+    const response: ApiResponse<OrderResponse> = await http.request<OrderResponse>({
+      operation,
+      method: "GET",
+      path: `/orders/${safeOrderId}`,
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      parse: parseJson<OrderResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        bodyText: response.text,
+        order: response.data,
+        url: response.url,
+      };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: A 404 may mean the order id is invalid for this environment, or /api/orders is not routed to order-service."
+        : response.status === 401
+          ? "\n\nHint: order-service is secured. Set VITE_DEV_BEARER_TOKEN to a valid JWT (Keycloak-issued) to view order details."
+          : "";
+
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      order: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
+    };
+  }
+
+  // PUBLIC_INTERFACE
+  async function getShippingQuotes(input: {
+    request: ShippingQuoteRequest;
+    signal?: AbortSignal;
+    bearerToken?: string;
+  }): Promise<ShippingQuotesApiResult> {
+    /** Calls shipping-service: POST /api/shipping/quotes (frontend path: "/shipping/quotes"). */
+    const operation = "shipping.getQuotes";
+
+    const response: ApiResponse<ShippingQuoteResponse> = await http.request<ShippingQuoteResponse>({
+      operation,
+      method: "POST",
+      path: "/shipping/quotes",
+      headers: {
+        Accept: "application/json",
+        ...(normalizeBearer(input.bearerToken) ? { Authorization: normalizeBearer(input.bearerToken)! } : {}),
+      },
+      body: input.request,
+      parse: parseJson<ShippingQuoteResponse>(),
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        status: response.status,
+        bodyText: response.text,
+        quotes: response.data,
+        url: response.url,
+      };
+    }
+
+    const responseSnippet = response.text ? response.text.slice(0, 1200) : "";
+    const hint =
+      response.status === 404
+        ? "\n\nHint: The shipping quote endpoint is expected at POST /api/shipping/quotes. Ensure the gateway routes /api/shipping/** to shipping-service."
+        : "";
+
+    return {
+      ok: false,
+      status: response.status,
+      bodyText: response.text,
+      quotes: undefined,
+      url: response.url,
+      error:
+        `${response.error.message}` +
+        (responseSnippet ? `\n\nResponse body (truncated):\n${responseSnippet}` : "") +
+        hint,
     };
   }
 
@@ -412,6 +1033,25 @@ export function createShopizerApi(params: {
     },
     catalog: {
       getCategoryTree,
+      listProducts,
+      getProductBySku,
+    },
+    cart: {
+      getOrCreateActiveCart,
+      getCart,
+      addItem,
+      setItemQuantity,
+      removeItem,
+    },
+    orders: {
+      listOrders,
+      getOrder,
+    },
+    shipping: {
+      getQuotes: getShippingQuotes,
+    },
+    checkout: {
+      createOrderFromCart,
     },
   };
 }

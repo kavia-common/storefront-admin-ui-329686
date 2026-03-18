@@ -40,6 +40,11 @@ export interface ApiRequestOptions<TResponse> {
   operation: string;
 }
 
+export type ApiRequestContextProvider = () => {
+  headers?: Record<string, string>;
+  query?: Record<string, string | number | boolean | undefined | null>;
+};
+
 export interface ApiSuccess<T> {
   ok: true;
   status: number;
@@ -110,6 +115,11 @@ export function createHttpClient(params: {
    */
   basePath: string;
   logger?: ApiLogger;
+  /**
+   * Optional context provider to attach default headers/query to every request.
+   * Useful for store/customer/currency/language "session" hints in frontend-only flows.
+   */
+  contextProvider?: ApiRequestContextProvider;
 }) {
   /**
    * Canonical HTTP client used by all frontend API modules.
@@ -129,7 +139,11 @@ export function createHttpClient(params: {
 
   async function request<TResponse>(options: ApiRequestOptions<TResponse>): Promise<ApiResponse<TResponse>> {
     assertValidPath(options.path);
-    const url = `${basePath}${options.path}${buildQueryString(options.query)}`;
+
+    const ctx = params.contextProvider?.() ?? undefined;
+    const mergedQuery = { ...(ctx?.query ?? {}), ...(options.query ?? {}) };
+
+    const url = `${basePath}${options.path}${buildQueryString(mergedQuery)}`;
 
     logger({
       level: "debug",
@@ -140,6 +154,7 @@ export function createHttpClient(params: {
 
     const headers: Record<string, string> = {
       Accept: "application/json",
+      ...(ctx?.headers ?? {}),
       ...options.headers,
     };
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { shopizerApi } from "../../../api";
 import type { CategoryNode, CategoryTreeResult } from "../../../api/shopizerApi";
+import { useStoreSession } from "../../../shared/session/StoreSessionContext";
 
 function getCategoryDisplayName(category: CategoryNode): string {
   return (
@@ -43,10 +44,14 @@ function filterTree(nodes: CategoryNode[], query: string): CategoryNode[] {
   return nodes.map((n) => walk(n)).filter((x): x is CategoryNode => Boolean(x));
 }
 
-function CategoryTreeNodeView(props: { node: CategoryNode; defaultOpen: boolean }) {
+function CategoryTreeNodeView(props: { node: CategoryNode; defaultOpen: boolean; showDeveloperDetails: boolean }) {
   const name = getCategoryDisplayName(props.node);
   const countSuffix = typeof props.node.productCount === "number" ? ` · ${props.node.productCount} products` : "";
-  const metaPieces = [props.node.code ? `code: ${props.node.code}` : null, countSuffix ? countSuffix.trim() : null]
+
+  const metaPieces = [
+    props.showDeveloperDetails && props.node.code ? `code: ${props.node.code}` : null,
+    countSuffix ? countSuffix.trim() : null,
+  ]
     .filter(Boolean)
     .join(" ");
 
@@ -87,6 +92,7 @@ function CategoryTreeNodeView(props: { node: CategoryNode; defaultOpen: boolean 
               key={`${c.code ?? c.id ?? "cat"}-${idx}`}
               node={c}
               defaultOpen={props.defaultOpen}
+              showDeveloperDetails={props.showDeveloperDetails}
             />
           ))}
         </ul>
@@ -98,6 +104,10 @@ function CategoryTreeNodeView(props: { node: CategoryNode; defaultOpen: boolean 
 // PUBLIC_INTERFACE
 export function CategoriesPage() {
   /** Storefront categories view: loads category hierarchy from backend and renders a filterable tree with robust empty/error states. */
+  const {
+    derived: { showDeveloperDetails },
+  } = useStoreSession();
+
   const [result, setResult] = useState<CategoryTreeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
@@ -107,7 +117,7 @@ export function CategoriesPage() {
 
     const load = async () => {
       setLoading(true);
-      const r = await shopizerApi.catalog.getCategoryTree({ store: "DEFAULT", signal: controller.signal });
+      const r = await shopizerApi.catalog.getCategoryTree({ signal: controller.signal });
       setResult(r);
       setLoading(false);
     };
@@ -118,7 +128,6 @@ export function CategoriesPage() {
   }, []);
 
   const roots = useMemo(() => normalizeRoots(result?.ok ? result.categories : []), [result]);
-
   const filteredRoots = useMemo(() => filterTree(roots, filter), [roots, filter]);
 
   const showExpanded = filter.trim().length > 0;
@@ -129,20 +138,27 @@ export function CategoriesPage() {
         <h1>Categories</h1>
         <span className="badge">Catalog</span>
       </div>
+
       <p className="pageSubtitle">
-        Category hierarchy loaded via <code>/api</code> proxy (best-effort).
+        {showDeveloperDetails ? (
+          <>
+            Category hierarchy loaded via <code>/api</code> proxy (best-effort).
+          </>
+        ) : (
+          <>Browse categories available in this store.</>
+        )}
       </p>
 
       <div className="toolbar" aria-label="Category filters">
         <label>
           <span className="muted" style={{ display: "block", marginBottom: "0.25rem" }}>
-            Filter by name/code
+            Filter by name{showDeveloperDetails ? "/code" : ""}
           </span>
           <input
             className="textInput"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder='e.g. "shirts", "cotton", "DEFAULT"'
+            placeholder='e.g. "shirts", "cotton"'
             aria-label="Filter categories"
           />
         </label>
@@ -167,7 +183,7 @@ export function CategoriesPage() {
             ) : (
               "Request failed"
             )}
-            {result.url ? (
+            {showDeveloperDetails && result.url ? (
               <>
                 {" "}
                 · URL: <code>{result.url}</code>
@@ -177,12 +193,16 @@ export function CategoriesPage() {
 
           {result.status === 404 ? (
             <div className="alert" role="status">
-              <div className="alertTitle">Endpoint not found</div>
-              <p style={{ marginBottom: 0 }}>
-                The backend currently running behind <code>/api</code> does not appear to expose a categories endpoint.
-                This UI will keep working and show proper states, but there is no data to render until the backend is
-                available.
-              </p>
+              <div className="alertTitle">Catalog unavailable</div>
+              {showDeveloperDetails ? (
+                <p style={{ marginBottom: 0 }}>
+                  This UI only calls the modern catalog endpoint. A 404 usually means the API gateway is not routing{" "}
+                  <code>/api/v1/catalog/**</code>, or the configured store UUID does not exist (see{" "}
+                  <code>VITE_DEFAULT_STORE_ID</code>).
+                </p>
+              ) : (
+                <p style={{ marginBottom: 0 }}>Please try again in a moment. If the issue persists, contact support.</p>
+              )}
             </div>
           ) : (
             <>
@@ -190,12 +210,14 @@ export function CategoriesPage() {
                 {result.error ?? "Unknown error"}
               </p>
 
-              <details style={{ marginTop: "0.75rem" }}>
-                <summary className="muted">Diagnostics (response body)</summary>
-                <pre style={{ overflowX: "auto", margin: "0.5rem 0 0 0" }}>
-                  {result.bodyText ? result.bodyText.slice(0, 4000) : "(empty body)"}
-                </pre>
-              </details>
+              {showDeveloperDetails && (
+                <details style={{ marginTop: "0.75rem" }}>
+                  <summary className="muted">Diagnostics (response body)</summary>
+                  <pre style={{ overflowX: "auto", margin: "0.5rem 0 0 0" }}>
+                    {result.bodyText ? result.bodyText.slice(0, 4000) : "(empty body)"}
+                  </pre>
+                </details>
+              )}
             </>
           )}
         </div>
@@ -214,7 +236,13 @@ export function CategoriesPage() {
         <div className="card">
           <h2 style={{ marginTop: 0 }}>No matches</h2>
           <p className="muted" style={{ marginBottom: 0 }}>
-            Try a different filter. Tip: searching by category <code>code</code> often works well.
+            Try a different filter.
+            {showDeveloperDetails ? (
+              <>
+                {" "}
+                Tip: searching by category <code>code</code> often works well.
+              </>
+            ) : null}
           </p>
         </div>
       )}
@@ -224,7 +252,12 @@ export function CategoriesPage() {
           <h2 style={{ marginTop: 0 }}>Category tree</h2>
           <ul style={{ marginTop: 0 }}>
             {filteredRoots.map((n, idx) => (
-              <CategoryTreeNodeView key={`${n.code ?? n.id ?? "cat"}-${idx}`} node={n} defaultOpen={showExpanded} />
+              <CategoryTreeNodeView
+                key={`${n.code ?? n.id ?? "cat"}-${idx}`}
+                node={n}
+                defaultOpen={showExpanded}
+                showDeveloperDetails={showDeveloperDetails}
+              />
             ))}
           </ul>
         </div>
